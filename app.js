@@ -5,6 +5,7 @@ import { GLTFLoader } from 'https://unpkg.com/three@0.158.0/examples/jsm/loaders
 import { FBXLoader } from 'https://unpkg.com/three@0.158.0/examples/jsm/loaders/FBXLoader.js';
 
 const container = document.getElementById('app');
+const hud = document.getElementById("physicsHUD");
 
 // Renderer
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -89,6 +90,7 @@ function loadFBX(url) {
 
 // helicopter model objects
 let helicopterModel = null;
+
 let mainRotor = null;
 let mixer = null;
 
@@ -97,6 +99,8 @@ const physics = {
     liftForce: 0,     // 0..100 (UI)
     rotorSpeed: 0     // angular speed in rad/s (computed from lift or UI mapping)
 };
+
+const helicopterMass = 150; 
 
 const LIFT_THRESHOLD = 30;     // lift threshold for producing upward force
 const MAX_ROTOR_SPEED = 50;    // max rotor angular speed (rad/s) used for visuals
@@ -265,36 +269,79 @@ function updateHelicopterPhysics(delta) {
     if (!helicopterLoaded || !helicopterGroup) return;
 
     // baca nilai dari GUI
-    const liftForce = physics.liftForce;
+    const liftInput = physics.liftForce;
 
-    // hitung gaya angkat
-    let liftAccel = 0;
-    if (liftForce > LIFT_THRESHOLD) {
-        liftAccel = (liftForce - LIFT_THRESHOLD) * 0.10; 
-    }
+    // LIFT = input × koefisien
+    const lift = liftInput * 15; // gaya ke atas
 
-    // gravitasi
-    const gravityAccel = -9.8 * 0.15; 
+    // GRAVITY
+    const gravity = helicopterMass * 9.8;
 
-    // update velocity
-    verticalVelocity += (liftAccel + gravityAccel) * delta;
+    // AIR DRAG (penting agar tidak memantul!)
+    const drag = Math.abs(verticalVelocity) * 8;
 
-    // drag (supaya tidak memantul)
-    verticalVelocity *= 0.98;
+    // NET FORCE
+    const netForce = lift - gravity - drag;
 
-    // clamp
-    verticalVelocity = Math.min(verticalVelocity, 10);
-    verticalVelocity = Math.max(verticalVelocity, -10);
+    // ACCELERATION
+    const acc = netForce / helicopterMass;
 
-    // update posisi heli
+    // UPDATE VELOCITY
+    verticalVelocity += acc * delta;
+
+    // UPDATE POSITION
     helicopterGroup.position.y += verticalVelocity * delta * 60;
 
-    // collision dengan tanah
+    // COLLISION
     if (helicopterGroup.position.y < restY) {
         helicopterGroup.position.y = restY;
-        verticalVelocity = 0;  // stop bouncing
+        verticalVelocity = 0;
     }
+
+    // STATE STATUS
+    let state = "Hover ≈";
+    if (netForce > 50) state = "Rising ↑";
+    else if (netForce < -50) state = "Falling ↓";
+
+    // UPDATE HUD
+    updateHUD({
+        lift,
+        weight: gravity,
+        drag,
+        netForce,
+        acc,
+        vel: verticalVelocity,
+        pos: helicopterGroup.position.y,
+        state
+    });
 }
+
+function updateHUD(params) {
+    const { lift, weight, drag, netForce, acc, vel, pos, state } = params;
+
+    hud.textContent =
+`--- HELICOPTER PHYSICS ---
+Lift Force : ${lift.toFixed(2)} N
+Gravity    : ${weight.toFixed(2)} N
+Drag       : ${drag.toFixed(2)} N
+---------------------------
+Net Force  : ${netForce.toFixed(2)} N
+Accel      : ${acc.toFixed(2)} m/s²
+Velocity   : ${vel.toFixed(2)} m/s
+Height     : ${pos.toFixed(2)} m
+---------------------------
+State      : ${state}
+
+Hukum Aktif:
+✓ Newton II  (F = m a)
+✓ Newton III (Lift reaction)
+✓ Gravity    (mg)
+✓ Drag       (air damping)
+${pos <= restY + 0.01 ? "✓ Ground Collision" : "Ground Collision: OFF"}
+`;
+}
+
+
 
 // Animation loop
 const clock = new THREE.Clock();
