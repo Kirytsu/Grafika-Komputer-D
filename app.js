@@ -1,5 +1,6 @@
 import * as THREE from 'https://unpkg.com/three@0.158.0/build/three.module.js';
 import { OrbitControls } from 'https://unpkg.com/three@0.158.0/examples/jsm/controls/OrbitControls.js';
+import GUI from 'https://cdn.jsdelivr.net/npm/lil-gui@0.19/+esm';
 import { GLTFLoader } from 'https://unpkg.com/three@0.158.0/examples/jsm/loaders/GLTFLoader.js';
 import { FBXLoader } from 'https://unpkg.com/three@0.158.0/examples/jsm/loaders/FBXLoader.js';
 
@@ -11,7 +12,6 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 // prefer linear/srgb handling depending on three.js version
 if ('outputColorSpace' in renderer) {
-	// three r150+ exposes this
 	renderer.outputColorSpace = THREE.SRGBColorSpace;
 }
 container.appendChild(renderer.domElement);
@@ -30,6 +30,14 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.05;
 controls.maxPolarAngle = Math.PI / 2 - 0.05; // Prevent going below ground
 
+// buat limit ketinggian kamera yang menggunakan PAN
+const MIN_CAMERA_Y = 0.2;
+controls.addEventListener('change', () => {
+    if (camera.position.y < MIN_CAMERA_Y) {
+        camera.position.y = MIN_CAMERA_Y;
+    }
+});
+
 // Lights
 const hemi = new THREE.HemisphereLight(0xffffff, 0x8d7c6b, 0.8);
 scene.add(hemi);
@@ -37,7 +45,6 @@ scene.add(hemi);
 const dir = new THREE.DirectionalLight(0xffffff, 1.2);
 dir.position.set(50, 50, 30);
 dir.castShadow = true;
-// Increase shadow map size for better quality
 dir.shadow.mapSize.width = 2048;
 dir.shadow.mapSize.height = 2048;
 dir.shadow.camera.left = -100;
@@ -48,48 +55,25 @@ dir.shadow.camera.near = 0.5;
 dir.shadow.camera.far = 200;
 scene.add(dir);
 
-// Enable shadows on renderer
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-// Helpers
-// const grid = new THREE.GridHelper(200, 40, 0x333333, 0x222222);
-// scene.add(grid);
-
-// const axes = new THREE.AxesHelper(5);
-// scene.add(axes);
-
 // ===== HIERARCHICAL SCENE STRUCTURE =====
-// Create organized groups following best practices
-
-// Scene root and groups - hierarchical structure
 const sceneRoot = new THREE.Group();
 sceneRoot.name = 'SceneRoot';
 scene.add(sceneRoot);
 
-// Environment Group - contains all static environment objects
 const environmentGroup = new THREE.Group();
 environmentGroup.name = 'Environment';
 sceneRoot.add(environmentGroup);
 
-// Ground plane with grass texture - much larger field
+// Ground and helicopter groups
 let ground;
-
-// Helicopter Group - contains the helicopter and all its components
 const helicopterGroup = new THREE.Group();
 helicopterGroup.name = 'HelicopterGroup';
 sceneRoot.add(helicopterGroup);
 
-// Physics state (1 scene unit = 1 meter)
-let physicsEnabled = true;
-let restY = 0;
-let velocityY = 0;
-let helicopterMass = 1500; // kg
-const GRAVITY_ACCEL = -9.81; // m/s^2 (10x Earth gravity for faster visual response)
-const RESTITUTION = 0.12;
-let externalForceY = 0;
-
-// Promisified loaders so we can wait until both ground and model are ready
+// loaders
 const gltfLoader = new GLTFLoader();
 const fbxLoader = new FBXLoader();
 function loadGLTF(url) {
@@ -103,17 +87,50 @@ function loadFBX(url) {
 	});
 }
 
+// helicopter model objects
 let helicopterModel = null;
-// Detected rotor nodes (populated after FBX load)
 let mainRotor = null;
-
-// Animation mixer for FBX animation clips (if present)
 let mixer = null;
 
-// Rotor speeds (rpm) - tweakable for visual animation
-const MAIN_ROTOR_RPM = 400; // main rotor rotations per minute
+// Physics / flight state (BEST PRACTICE)
+const physics = {
+    liftForce: 0,     // 0..100 (UI)
+    rotorSpeed: 0     // angular speed in rad/s (computed from lift or UI mapping)
+};
 
-// Load both resources and then place the helicopter relative to the ground
+const LIFT_THRESHOLD = 30;     // lift threshold for producing upward force
+const MAX_ROTOR_SPEED = 50;    // max rotor angular speed (rad/s) used for visuals
+
+let verticalVelocity = 0;      // m/s-like unit (scene units per second)
+// const GRAVITY = -9.81 * 0.15;  // tuned gravity (scaled for visual feel)
+// const LIFT_MULTIPLIER = 0.12;  // tuned multiplier to convert (liftForce - threshold) -> upward accel
+// const DRAG = 0.96;             // velocity damping per frame (0..1)
+// const MAX_UP_VELOCITY = 6.0;   // clamp upward speed (scene units / s)
+// const MAX_DOWN_VELOCITY = -10.0; // clamp downward speed
+
+let restY = 0;            // HEIGHT of helicopter on ground
+let helicopterLoaded = false;
+
+// GUI
+const gui = new GUI();
+const heliFolder = gui.addFolder('Helicopter Controls');
+
+// liftForce 0..100
+heliFolder.add(physics, 'liftForce', 0, 100, 1)
+    .name('Lift Force')
+    .onChange(v => {
+        // map liftForce to rotorSpeed visually (for immediate feedback)
+        physics.rotorSpeed = (v / 100) * MAX_ROTOR_SPEED;
+    });
+
+// rotorSpeed read-only display
+heliFolder.add(physics, 'rotorSpeed').name('Rotor Speed (rad/s)').listen();
+heliFolder.open();
+
+// Rotor RPM constant for legacy visual rotation (kept for reference)
+const MAIN_ROTOR_RPM = 400;
+
+// Load resources and setup scene
 Promise.allSettled([
 	loadGLTF('./model/grass_texture.glb'),
 	loadFBX('./model/MD 902 Explorer.fbx')
@@ -121,8 +138,7 @@ Promise.allSettled([
 	const gltfResult = results[0];
 	const fbxResult = results[1];
 
-	// --- Ground / Environment ---
-	// ground dimensions in meters
+	// Ground
 	const groundWidth = 500;
 	const groundHeight = 500;
 
@@ -135,57 +151,52 @@ Promise.allSettled([
 		if (grassTexture) {
 			grassTexture.wrapS = THREE.RepeatWrapping;
 			grassTexture.wrapT = THREE.RepeatWrapping;
-			// tile so each texture repeat maps to 1m x 1m on the plane
 			grassTexture.repeat.set(groundWidth, groundHeight);
 		}
 		const groundGeometry = new THREE.PlaneGeometry(groundWidth, groundHeight, 50, 50);
 		const groundMaterial = new THREE.MeshStandardMaterial({ map: grassTexture, side: THREE.DoubleSide, roughness: 0.8, metalness: 0.0 });
 		ground = new THREE.Mesh(groundGeometry, groundMaterial);
-		ground.name = 'Ground';
-		ground.rotation.x = -Math.PI / 2;
-		ground.position.y = 0;
-		ground.receiveShadow = true;
-		environmentGroup.add(ground);
 	} else {
 		const groundGeometry = new THREE.PlaneGeometry(groundWidth, groundHeight, 50, 50);
 		const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x3a7d44, side: THREE.DoubleSide, roughness: 0.9, metalness: 0.0 });
 		ground = new THREE.Mesh(groundGeometry, groundMaterial);
-		ground.name = 'Ground';
-		ground.rotation.x = -Math.PI / 2;
-		ground.position.y = 0;
-		ground.receiveShadow = true;
-		environmentGroup.add(ground);
 	}
 
-	// --- Helicopter ---
+	ground.name = 'Ground';
+	ground.rotation.x = -Math.PI / 2;
+	ground.position.y = 0;
+	ground.receiveShadow = true;
+	environmentGroup.add(ground);
+
+	// Helicopter
 	if (fbxResult.status === 'fulfilled') {
 		const fbx = fbxResult.value;
 		helicopterModel = fbx;
 		helicopterModel.name = 'MD902_Model';
 
+		// Normalize scale to target length ~11
 		const box = new THREE.Box3().setFromObject(fbx);
 		const size = new THREE.Vector3();
 		box.getSize(size);
 		const center = new THREE.Vector3();
 		box.getCenter(center);
 
-		// MD 902 fuselage length ≈ 11m, set scale so largest dimension = 11
 		const targetSize = 11;
 		const currentSize = Math.max(size.x, size.y, size.z) || 1;
 		const scale = targetSize / currentSize;
 		helicopterModel.scale.setScalar(scale);
 
+		// Compute restY so model sits on ground
 		const groundY = ground ? ground.position.y : 0;
 		const clearance = 0.05;
 		const halfHeight = (size.y * scale) / 2;
 		const centerYScaled = center.y * scale;
 
-		helicopterMass = 1500; // fixed mass (kg)
-
+		// restY is world Y where helicopterGroup should be when touching ground
 		restY = groundY + clearance + halfHeight - centerYScaled;
 		helicopterGroup.position.set(0, restY + 0.05, 0);
-		velocityY = 0;
-		console.log('Start Y:', helicopterGroup.position.y.toFixed(2), 'restY:', restY.toFixed(2), 'drop:', (helicopterGroup.position.y - restY).toFixed(2));
+        helicopterLoaded = true;
+		verticalVelocity = 0;
 
 		helicopterModel.position.set(0, 0, 0);
 
@@ -193,56 +204,47 @@ Promise.allSettled([
 			if (child.isMesh) {
 				child.castShadow = true;
 				child.receiveShadow = true;
-
-				// Normalize materials to avoid unexpected transparency from FBX imports
 				const materials = Array.isArray(child.material) ? child.material : [child.material];
-				materials.forEach((mat) => {
-					if (!mat) return;
-					mat.transparent = false;
-				});
+				materials.forEach((mat) => { if (!mat) return; mat.transparent = false; });
 			}
 		});
 
 		helicopterGroup.add(helicopterModel);
 
-		// Collect rotor candidates and pick likely main/tail rotors (log details)
-		{
-			const rotorCandidates = [];
-			helicopterModel.traverse((child) => {
-				if (!child) return;
-				if (child.isMesh || child.type === 'Group' || child.type === 'Object3D') {
-					const box = new THREE.Box3().setFromObject(child);
-					const size = new THREE.Vector3();
-					box.getSize(size);
-					const center = new THREE.Vector3();
-					box.getCenter(center);
-					rotorCandidates.push({ node: child, name: child.name || '', size, center });
-				}
-			});
-
-			if (rotorCandidates.length) {
-				console.log('Rotor candidates found:', rotorCandidates.map(c => ({ name: c.name, size: c.size, center: c.center })));
-
-				const modelBox = new THREE.Box3().setFromObject(helicopterModel);
-				const modelCenter = new THREE.Vector3(); modelBox.getCenter(modelCenter);
-
-				let mainCandidate = rotorCandidates.find(c => /main|rotor|hub|mast|blade/i.test(c.name));
-				if (!mainCandidate) {
-					mainCandidate = rotorCandidates.slice().sort((a,b) => {
-						const aScore = a.center.y + (a.size.x + a.size.z) * 0.5;
-						const bScore = b.center.y + (b.size.x + b.size.z) * 0.5;
-						return bScore - aScore;
-					})[0];
-				}
-
-				if (mainCandidate) { mainRotor = mainCandidate.node; console.log('Assigned mainRotor ->', mainCandidate.name || mainRotor.id); }
-			} else {
-				console.log('No rotor candidates detected.');
+		// auto-detect rotor candidates
+		const rotorCandidates = [];
+		helicopterModel.traverse((child) => {
+			if (!child) return;
+			if (child.isMesh || child.type === 'Group' || child.type === 'Object3D') {
+				const box = new THREE.Box3().setFromObject(child);
+				const size = new THREE.Vector3();
+				box.getSize(size);
+				const center = new THREE.Vector3();
+				box.getCenter(center);
+				rotorCandidates.push({ node: child, name: child.name || '', size, center });
 			}
+		});
+
+		if (rotorCandidates.length) {
+			let mainCandidate = rotorCandidates.find(c => /main|rotor|hub|mast|blade/i.test(c.name));
+			if (!mainCandidate) {
+				mainCandidate = rotorCandidates.slice().sort((a,b) => {
+					const aScore = a.center.y + (a.size.x + a.size.z) * 0.5;
+					const bScore = b.center.y + (b.size.x + b.size.z) * 0.5;
+					return bScore - aScore;
+				})[0];
+			}
+			if (mainCandidate) {
+				mainRotor = mainCandidate.node;
+				console.log('Assigned mainRotor ->', mainCandidate.name || mainRotor.id);
+			}
+		} else {
+			console.log('No rotor candidates detected.');
 		}
 	} else {
 		console.error('Error loading helicopter:', fbxResult.reason);
-	}}).catch((e) => {
+	}
+}).catch((e) => {
 	console.error('Error loading resources:', e);
 });
 
@@ -256,46 +258,72 @@ function onWindowResize() {
 }
 window.addEventListener('resize', onWindowResize, false);
 
+// Physics update function (best practice velocity-based)
+function updateHelicopterPhysics(delta) {
+
+    // pastikan helikopter sudah load
+    if (!helicopterLoaded || !helicopterGroup) return;
+
+    // baca nilai dari GUI
+    const liftForce = physics.liftForce;
+
+    // hitung gaya angkat
+    let liftAccel = 0;
+    if (liftForce > LIFT_THRESHOLD) {
+        liftAccel = (liftForce - LIFT_THRESHOLD) * 0.10; 
+    }
+
+    // gravitasi
+    const gravityAccel = -9.8 * 0.15; 
+
+    // update velocity
+    verticalVelocity += (liftAccel + gravityAccel) * delta;
+
+    // drag (supaya tidak memantul)
+    verticalVelocity *= 0.98;
+
+    // clamp
+    verticalVelocity = Math.min(verticalVelocity, 10);
+    verticalVelocity = Math.max(verticalVelocity, -10);
+
+    // update posisi heli
+    helicopterGroup.position.y += verticalVelocity * delta * 60;
+
+    // collision dengan tanah
+    if (helicopterGroup.position.y < restY) {
+        helicopterGroup.position.y = restY;
+        verticalVelocity = 0;  // stop bouncing
+    }
+}
+
 // Animation loop
 const clock = new THREE.Clock();
 function animate() {
 	requestAnimationFrame(animate);
 	const delta = clock.getDelta();
 	const elapsed = clock.getElapsedTime();
-	
+
 	// Update controls
 	controls.update();
 
-	// Physics integration
-	if (physicsEnabled && helicopterGroup && helicopterModel) {
-		const gravityForce = helicopterMass * GRAVITY_ACCEL;
-		const totalForceY = gravityForce + externalForceY;
-		const accY = totalForceY / helicopterMass;
-		velocityY += accY * delta;
-		helicopterGroup.position.y += velocityY * delta;
-
-		// Ground collision
-		if (helicopterGroup.position.y <= restY) {
-			if (Math.abs(velocityY) > 0.5) {
-				helicopterGroup.position.y = restY;
-				velocityY = -velocityY * RESTITUTION;
-			} else {
-				helicopterGroup.position.y = restY;
-				velocityY = 0;
-			}
-		}
+	// Update rotor visual from physics.rotorSpeed
+	if (mainRotor) {
+		// rotor spin using physics.rotorSpeed (rad/s) * delta
+		mainRotor.rotateY(physics.rotorSpeed * delta);
+	} else {
+		// fallback spin using MAIN_ROTOR_RPM if physics.rotorSpeed is zero (visual)
+		// convert rpm to rad/s: rpm * 2π / 60
+		const mainOmega = (MAIN_ROTOR_RPM * 2 * Math.PI) / 60;
+		if (mainRotor) mainRotor.rotateY(mainOmega * delta);
 	}
-	
-	// Update FBX animations
+
+	// Update flight physics
+	updateHelicopterPhysics(delta);
+
+	// Update mixer if any animations present
 	if (mixer) mixer.update(delta);
 
-	// Rotate detected rotors for visual animation
-	if (mainRotor) {
-		const mainOmega = (MAIN_ROTOR_RPM * 2 * Math.PI) / 60;
-		mainRotor.rotateY(mainOmega * delta);
-	}
-	
-	// Render scene
+	// Render
 	renderer.render(scene, camera);
 }
 animate();
