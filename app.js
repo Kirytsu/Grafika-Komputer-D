@@ -1,55 +1,58 @@
+// Helicopter Simultion
+
+// Parameter Default: 
+// mass=2000kg
+// R=4.5m
+// Ω=23.5rad/s
+
+// Constants:
+// Ct=0.13
+// ρ=1.225kg/m³
+
+// Physic Calculations: 
+// W = m × g
+// T = Ct × ρ × π × R² × (Ω × R)²
+// F=T-W
+// a=F/m
+
 import * as THREE from "https://unpkg.com/three@0.158.0/build/three.module.js";
 import { OrbitControls } from "https://unpkg.com/three@0.158.0/examples/jsm/controls/OrbitControls.js";
-import GUI from "https://cdn.jsdelivr.net/npm/lil-gui@0.19/+esm";
 import { GLTFLoader } from "https://unpkg.com/three@0.158.0/examples/jsm/loaders/GLTFLoader.js";
 import { FBXLoader } from "https://unpkg.com/three@0.158.0/examples/jsm/loaders/FBXLoader.js";
 
-const container = document.getElementById("app");
-const hud = document.getElementById("physicsHUD");
-// ensure the HUD is positioned below the GUI controls so it isn't overlapped
-if (hud && hud.style) {
-  // move HUD lower
-  hud.style.top = "230px";
-}
+const container = document.getElementById("canvas-container") || document.getElementById("app");
+const infoPanelWidth = window.innerWidth * 0.4;
+const canvasWidth = window.innerWidth - infoPanelWidth;
 
-// Renderer
+// Setup renderer
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
-// prefer linear/srgb handling depending on three.js version
+renderer.setSize(canvasWidth, window.innerHeight);
 if ("outputColorSpace" in renderer) {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 }
 container.appendChild(renderer.domElement);
 
-// Scene
+// Setup scene
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87ceeb); // Sky blue background
+scene.background = new THREE.Color(0x87ceeb);
 
-// Camera
-const camera = new THREE.PerspectiveCamera(
-  60,
-  window.innerWidth / window.innerHeight,
-  0.1,
-  2000
-);
+// Setup camera
+const camera = new THREE.PerspectiveCamera(60, canvasWidth / window.innerHeight, 0.1, 2000);
 camera.position.set(25, 12, 35);
 
-// Controls
+// Setup controls
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.05;
-controls.maxPolarAngle = Math.PI / 2 - 0.05; // Prevent going below ground
+controls.maxPolarAngle = Math.PI / 2 - 0.05;
 
-// buat limit ketinggian kamera yang menggunakan PAN
 const MIN_CAMERA_Y = 0.2;
 controls.addEventListener("change", () => {
-  if (camera.position.y < MIN_CAMERA_Y) {
-    camera.position.y = MIN_CAMERA_Y;
-  }
+  if (camera.position.y < MIN_CAMERA_Y) camera.position.y = MIN_CAMERA_Y;
 });
 
-// Lights
+// Setup lights
 const hemi = new THREE.HemisphereLight(0xffffff, 0x8d7c6b, 0.8);
 scene.add(hemi);
 
@@ -69,247 +72,215 @@ scene.add(dir);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-// ===== HIERARCHICAL SCENE STRUCTURE =====
+// Scene structure
 const sceneRoot = new THREE.Group();
-sceneRoot.name = "SceneRoot";
 scene.add(sceneRoot);
 
 const environmentGroup = new THREE.Group();
-environmentGroup.name = "Environment";
 sceneRoot.add(environmentGroup);
 
-// Ground and helicopter groups
 let ground;
 const helicopterGroup = new THREE.Group();
-helicopterGroup.name = "HelicopterGroup";
 sceneRoot.add(helicopterGroup);
 
-// loaders
+// Loaders
 const gltfLoader = new GLTFLoader();
 const fbxLoader = new FBXLoader();
+
 function loadGLTF(url) {
-  return new Promise((resolve, reject) => {
-    gltfLoader.load(url, resolve, undefined, reject);
-  });
+  return new Promise((resolve, reject) => gltfLoader.load(url, resolve, undefined, reject));
 }
+
 function loadFBX(url) {
-  return new Promise((resolve, reject) => {
-    fbxLoader.load(url, resolve, undefined, reject);
-  });
+  return new Promise((resolve, reject) => fbxLoader.load(url, resolve, undefined, reject));
 }
 
-// helicopter model objects
+// Model objects
 let helicopterModel = null;
-
 let mainRotor = null;
-let mixer = null;
 
-// Physics / flight state (BEST PRACTICE)
+// Fisika helikopter
 const physics = {
-  liftForce: 0, // 0..100 (UI)
-  rotorSpeed: 0, // angular speed in rad/s (computed from lift or UI mapping)
-  mass: 2000, // helicopter mass in kg
-  a: 0, // actual acceleration (m/s^2)
-  desiredA: 0, // desired acceleration (m/s^2)
-  bladeRadius: 4.5, // rotor blade radius (m)
+  liftForce: 0,
+  rotorSpeed: 0,
+  mass: 2000,
+  a: 0,
+  desiredA: 0,
+  bladeRadius: 4.5,
 };
 
-// Base mass that corresponds to the current visual size
 const BASE_MASS = 2000;
-// Physical constants for rotor thrust model
-const AIR_DENSITY = 1.225; // kg/m^3 (sea level)
-// Thrust coefficient (tunable). Chosen so MAX_ROTOR_SPEED can generate reasonable thrust.
+const AIR_DENSITY = 1.225;
 const THRUST_COEFF = 0.13;
-// guard to avoid recursive GUI handler updates
+const MAX_ROTOR_SPEED = 50;
+
 let suppressHandlers = false;
-
-// keep a reference to the desired-acc GUI controller so we can update its display
-let desiredAController = null;
-
-// track previous mass (used earlier in logic)
-let lastMass = physics.mass;
-
-const MAX_ROTOR_SPEED = 50; // max rotor angular speed (rad/s) used for visuals
-
-let verticalVelocity = 0; // m/s-like unit (scene units per second)
-
-let restY = 0; // HEIGHT of helicopter on ground
+let verticalVelocity = 0;
+let restY = 0;
 let helicopterLoaded = false;
 
-// GUI
-const gui = new GUI();
-const heliFolder = gui.addFolder("Helicopter Controls");
+// HTML slider controls
+const liftSlider = document.getElementById('lift-slider');
+const rotorSlider = document.getElementById('rotor-slider');
+const radiusSlider = document.getElementById('radius-slider');
+const accelSlider = document.getElementById('accel-slider');
+const massSlider = document.getElementById('mass-slider');
 
-// liftForce is in Newtons
-heliFolder
-  .add(physics, "liftForce", 0, 30000, 1)
-  .name("Lift Force (N)")
-  .onChange((v) => {
-    if (suppressHandlers) return;
-    suppressHandlers = true;
-    // User directly changed total thrust (N). Recompute rotorSpeed required
-    // from T = Ct * rho * A * (omega * R)^2. If required omega exceeds
-    // MAX_ROTOR_SPEED clamp and update liftForce to achievable thrust.
-    const T = v <= 0 ? 0 : v;
-    const R = physics.bladeRadius;
-    const A = Math.PI * R * R;
-    const denom = THRUST_COEFF * AIR_DENSITY * A;
-    let omegaReq = 0;
-    if (denom > 0 && R > 0) {
-      omegaReq = Math.sqrt(Math.max(0, T / denom)) / R;
-    }
-    let saturated = false;
-    let omega = omegaReq;
-    if (omegaReq > MAX_ROTOR_SPEED) {
-      saturated = true;
-      omega = MAX_ROTOR_SPEED;
-      // compute achievable thrust at clamped omega
-      const vtip = omega * R;
-      const achievableT = THRUST_COEFF * AIR_DENSITY * A * (vtip * vtip);
-      physics.liftForce = achievableT;
-    } else {
-      physics.liftForce = T;
-    }
-    physics.rotorSpeed = omega;
-    // recompute acceleration for display
-    const drag = Math.abs(verticalVelocity) * 8;
-    physics.a = (physics.liftForce - physics.mass * 9.8 - drag) / physics.mass;
-    // update desiredA display to reflect current achievable acceleration
-    if (desiredAController) {
-      physics.desiredA = physics.a;
-      desiredAController.setValue(physics.desiredA);
-    }
-    suppressHandlers = false;
-  })
-  .listen();
+// Get value display elements
+const liftValue = document.getElementById('lift-value');
+const rotorValue = document.getElementById('rotor-value');
+const radiusValue = document.getElementById('radius-value');
+const accelValue = document.getElementById('accel-value');
+const massValue = document.getElementById('mass-value');
 
-// Rotor Controls folder (rotor speed and blade radius and desired acceleration)
-const rotorFolder = gui.addFolder("Rotor Controls");
-
-// rotorSpeed: changing rotorSpeed updates liftForce and acceleration
-rotorFolder
-  .add(physics, "rotorSpeed", 0, MAX_ROTOR_SPEED, 0.1)
-  .name("Rotor Speed (rad/s)")
-  .onChange((v) => {
-    if (suppressHandlers) return;
-    suppressHandlers = true;
-    // compute thrust T = Ct * rho * A * (omega * R)^2
-    const R = physics.bladeRadius;
-    const A = Math.PI * R * R;
-    const vtip = v * R;
-    const T = THRUST_COEFF * AIR_DENSITY * A * (vtip * vtip);
-    physics.liftForce = T;
-    // compute acceleration a = (T - m*g - drag) / m
-    const drag = Math.abs(verticalVelocity) * 8;
-    physics.a = (T - physics.mass * 9.8 - drag) / physics.mass;
-    // update desiredA display to reflect current achievable acceleration
-    if (desiredAController) {
-      physics.desiredA = physics.a;
-      desiredAController.setValue(physics.desiredA);
-    }
-    suppressHandlers = false;
-  })
-  .listen();
-
-// blade radius control: changing R updates thrust and acceleration (rotorSpeed kept)
-rotorFolder
-  .add(physics, "bladeRadius", 2, 10, 0.5)
-  .name("Blade Radius (m)")
-  .onChange((v) => {
-    if (suppressHandlers) return;
-    suppressHandlers = true;
-    const R = v;
-    const A = Math.PI * R * R;
-    const omega = physics.rotorSpeed;
+// Slider event handlers
+liftSlider.addEventListener('input', (e) => {
+  if (suppressHandlers) return;
+  suppressHandlers = true;
+  
+  const v = parseFloat(e.target.value);
+  liftValue.textContent = Math.round(v);
+  
+  const T = v <= 0 ? 0 : v;
+  const R = physics.bladeRadius;
+  const A = Math.PI * R * R;
+  const denom = THRUST_COEFF * AIR_DENSITY * A;
+  let omegaReq = 0;
+  if (denom > 0 && R > 0) {
+    omegaReq = Math.sqrt(Math.max(0, T / denom)) / R;
+  }
+  let omega = omegaReq;
+  if (omegaReq > MAX_ROTOR_SPEED) {
+    omega = MAX_ROTOR_SPEED;
     const vtip = omega * R;
-    const T = THRUST_COEFF * AIR_DENSITY * A * (vtip * vtip);
+    const achievableT = THRUST_COEFF * AIR_DENSITY * A * (vtip * vtip);
+    physics.liftForce = achievableT;
+    liftSlider.value = achievableT;
+    liftValue.textContent = Math.round(achievableT);
+  } else {
     physics.liftForce = T;
-    const drag = Math.abs(verticalVelocity) * 8;
-    physics.a = (T - physics.mass * 9.8 - drag) / physics.mass;
-    // update desiredA display to reflect current achievable acceleration
-    if (desiredAController) {
-      physics.desiredA = physics.a;
-      desiredAController.setValue(physics.desiredA);
-    }
-    // Update rotor visual scale to reflect blade radius change (X/Z axes)
-    if (mainRotor && mainRotor.userData && mainRotor.userData.baseRadius) {
-      const baseR = mainRotor.userData.baseRadius || 1;
-      const baseScale =
-        mainRotor.userData.baseScale || new THREE.Vector3(1, 1, 1);
-      // scale factor relative to stored base radius
-      const scaleFactor = R / baseR;
-      mainRotor.scale.set(
-        baseScale.x * scaleFactor,
-        baseScale.y,
-        baseScale.z * scaleFactor
-      );
-    }
-    suppressHandlers = false;
-  })
-  .listen();
+  }
+  physics.rotorSpeed = omega;
+  rotorSlider.value = omega;
+  rotorValue.textContent = omega.toFixed(1);
+  
+  physics.a = (physics.liftForce - physics.mass * 9.8) / physics.mass;
+  accelSlider.value = physics.a;
+  accelValue.textContent = physics.a.toFixed(1);
+  physics.desiredA = physics.a;
+  
+  suppressHandlers = false;
+});
 
-// desired acceleration control: changing a adjusts rotorSpeed to reach that acceleration
-rotorFolder;
-// store controller reference so other handlers can update its displayed value
-desiredAController = rotorFolder
-  .add(physics, "desiredA", 0, 20, 0.01)
-  .name("Desired Acc (m/s²)")
-  .onChange((v) => {
-    if (suppressHandlers) return;
-    suppressHandlers = true;
-    // when user sets a desired acceleration, compute required rotor speed
-    const desiredA = v;
-    const drag = Math.abs(verticalVelocity) * 8;
-    // required thrust T = m*(a + g) + drag
-    const requiredT = physics.mass * (desiredA + 9.8) + drag;
-    // compute omega = sqrt(T / (Ct * rho * A)) / R
-    const R = physics.bladeRadius;
-    const A = Math.PI * R * R;
-    let omega = 0;
-    if (THRUST_COEFF * AIR_DENSITY * A * (R * R) > 0) {
-      omega = Math.sqrt(requiredT / (THRUST_COEFF * AIR_DENSITY * A)) / R;
-    }
-    // clamp omega
-    if (omega > MAX_ROTOR_SPEED) omega = MAX_ROTOR_SPEED;
-    physics.rotorSpeed = Math.max(0, Math.min(MAX_ROTOR_SPEED, omega));
-    // derive liftForce from rotorSpeed (do not directly set lift to requiredT)
-    const vtip = physics.rotorSpeed * R;
-    physics.liftForce = THRUST_COEFF * AIR_DENSITY * A * (vtip * vtip);
-    // actual acceleration will be computed each physics tick and stored in physics.a
-    suppressHandlers = false;
-  })
-  .listen();
+rotorSlider.addEventListener('input', (e) => {
+  if (suppressHandlers) return;
+  suppressHandlers = true;
+  
+  const v = parseFloat(e.target.value);
+  rotorValue.textContent = v.toFixed(1);
+  physics.rotorSpeed = v;
+  
+  const R = physics.bladeRadius;
+  const A = Math.PI * R * R;
+  const vtip = v * R;
+  const T = THRUST_COEFF * AIR_DENSITY * A * (vtip * vtip);
+  physics.liftForce = T;
+  liftSlider.value = T;
+  liftValue.textContent = Math.round(T);
+  
+  physics.a = (T - physics.mass * 9.8) / physics.mass;
+  accelSlider.value = physics.a;
+  accelValue.textContent = physics.a.toFixed(1);
+  physics.desiredA = physics.a;
+  
+  suppressHandlers = false;
+});
 
-rotorFolder.open();
+radiusSlider.addEventListener('input', (e) => {
+  if (suppressHandlers) return;
+  suppressHandlers = true;
+  
+  const v = parseFloat(e.target.value);
+  radiusValue.textContent = v.toFixed(1);
+  
+  const R = v;
+  physics.bladeRadius = R;
+  const A = Math.PI * R * R;
+  const omega = physics.rotorSpeed;
+  const vtip = omega * R;
+  const T = THRUST_COEFF * AIR_DENSITY * A * (vtip * vtip);
+  physics.liftForce = T;
+  liftSlider.value = T;
+  liftValue.textContent = Math.round(T);
+  
+  physics.a = (T - physics.mass * 9.8) / physics.mass;
+  accelSlider.value = physics.a;
+  accelValue.textContent = physics.a.toFixed(1);
+  physics.desiredA = physics.a;
+  
+  // Update visual rotor scale
+  if (mainRotor && mainRotor.userData && mainRotor.userData.baseRadius) {
+    const baseR = mainRotor.userData.baseRadius || 1;
+    const baseScale = mainRotor.userData.baseScale || new THREE.Vector3(1, 1, 1);
+    const scaleFactor = R / baseR;
+    mainRotor.scale.set(
+      baseScale.x * scaleFactor,
+      baseScale.y,
+      baseScale.z * scaleFactor
+    );
+  }
+  
+  suppressHandlers = false;
+});
 
-// Add mass control to GUI (kg)
-heliFolder
-  .add(physics, "mass", 100, 5000, 10)
-  .name("Mass (kg)")
-  .onChange((v) => {
-    // When mass changes DO NOT modify liftForce automatically.
-    // Only update mass and recompute acceleration from the current lift.
-    if (suppressHandlers) return;
-    suppressHandlers = true;
-    const newMass = v <= 0 ? 1 : v;
-    physics.mass = newMass;
-    // recompute acceleration using the existing liftForce (unchanged)
-    const dragNow = Math.abs(verticalVelocity) * 8;
-    physics.a =
-      (physics.liftForce - physics.mass * 9.8 - dragNow) / physics.mass;
-    // update desiredA display because changing mass affects achievable accel
-    if (desiredAController) {
-      physics.desiredA = physics.a;
-      desiredAController.setValue(physics.desiredA);
-    }
-    lastMass = physics.mass;
-    suppressHandlers = false;
-  });
+accelSlider.addEventListener('input', (e) => {
+  if (suppressHandlers) return;
+  suppressHandlers = true;
+  
+  const v = parseFloat(e.target.value);
+  accelValue.textContent = v.toFixed(1);
+  physics.desiredA = v;
+  
+  const desiredA = v;
+  const requiredT = physics.mass * (desiredA + 9.8);
+  const R = physics.bladeRadius;
+  const A = Math.PI * R * R;
+  let omega = 0;
+  if (THRUST_COEFF * AIR_DENSITY * A * (R * R) > 0) {
+    omega = Math.sqrt(requiredT / (THRUST_COEFF * AIR_DENSITY * A)) / R;
+  }
+  if (omega > MAX_ROTOR_SPEED) omega = MAX_ROTOR_SPEED;
+  physics.rotorSpeed = Math.max(0, Math.min(MAX_ROTOR_SPEED, omega));
+  rotorSlider.value = physics.rotorSpeed;
+  rotorValue.textContent = physics.rotorSpeed.toFixed(1);
+  
+  const vtip = physics.rotorSpeed * R;
+  physics.liftForce = THRUST_COEFF * AIR_DENSITY * A * (vtip * vtip);
+  liftSlider.value = physics.liftForce;
+  liftValue.textContent = Math.round(physics.liftForce);
+  
+  suppressHandlers = false;
+});
 
-// Rotor RPM constant for legacy visual rotation (kept for reference)
-const MAIN_ROTOR_RPM = 400;
+massSlider.addEventListener('input', (e) => {
+  if (suppressHandlers) return;
+  suppressHandlers = true;
+  
+  const v = parseFloat(e.target.value);
+  massValue.textContent = Math.round(v);
+  
+  const newMass = v <= 0 ? 1 : v;
+  physics.mass = newMass;
+  
+  physics.a = (physics.liftForce - physics.mass * 9.8) / physics.mass;
+  accelSlider.value = physics.a;
+  accelValue.textContent = physics.a.toFixed(1);
+  physics.desiredA = physics.a;
+  
+  suppressHandlers = false;
+});
 
-// Load resources and setup scene
+// Load 3D models
 Promise.allSettled([
   loadGLTF("./model/grass_texture.glb"),
   loadFBX("./model/MD 902 Explorer.fbx"),
@@ -318,9 +289,10 @@ Promise.allSettled([
     const gltfResult = results[0];
     const fbxResult = results[1];
 
-    // Ground
     const groundWidth = 500;
     const groundHeight = 500;
+
+    // Load ground with texture
 
     if (gltfResult.status === "fulfilled") {
       const gltf = gltfResult.value;
@@ -363,19 +335,17 @@ Promise.allSettled([
       ground = new THREE.Mesh(groundGeometry, groundMaterial);
     }
 
-    ground.name = "Ground";
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = 0;
     ground.receiveShadow = true;
     environmentGroup.add(ground);
 
-    // Helicopter
+    // Load helicopter model
     if (fbxResult.status === "fulfilled") {
       const fbx = fbxResult.value;
       helicopterModel = fbx;
-      helicopterModel.name = "MD902_Model";
 
-      // Normalize scale to target length ~11
+      // Scale model to target size
       const box = new THREE.Box3().setFromObject(fbx);
       const size = new THREE.Vector3();
       box.getSize(size);
@@ -387,27 +357,29 @@ Promise.allSettled([
       const scale = targetSize / currentSize;
       helicopterModel.scale.setScalar(scale);
 
-      // Compute restY so model sits on ground
+      // Calculate ground position
       const groundY = ground ? ground.position.y : 0;
       const clearance = 0.05;
       const halfHeight = (size.y * scale) / 2;
       const centerYScaled = center.y * scale;
 
-      // restY is world Y where helicopterGroup should be when touching ground
       restY = groundY + clearance + halfHeight - centerYScaled;
       helicopterGroup.position.set(0, restY + 0.05, 0);
-      // store metadata needed to keep ground contact when we change visual scale
+      
+      // Store metadata untuk scaling
       helicopterGroup.userData = helicopterGroup.userData || {};
       helicopterGroup.userData.groundY = groundY;
       helicopterGroup.userData.clearance = clearance;
       helicopterGroup.userData.baseRestOffset = restY - (groundY + clearance);
       helicopterGroup.userData.currentRestY = restY;
       helicopterGroup.userData.baseModelScale = scale;
+      
       helicopterLoaded = true;
       verticalVelocity = 0;
 
       helicopterModel.position.set(0, 0, 0);
 
+      // Setup shadows
       helicopterModel.traverse((child) => {
         if (child.isMesh) {
           child.castShadow = true;
@@ -424,7 +396,7 @@ Promise.allSettled([
 
       helicopterGroup.add(helicopterModel);
 
-      // auto-detect rotor candidates
+      // Detect main rotor
       const rotorCandidates = [];
       helicopterModel.traverse((child) => {
         if (!child) return;
@@ -460,33 +432,20 @@ Promise.allSettled([
         }
         if (mainCandidate) {
           mainRotor = mainCandidate.node;
-          // store base radius and base scale for visual blade scaling
           mainRotor.userData = mainRotor.userData || {};
-          const estimatedRadius =
-            Math.max(mainCandidate.size.x, mainCandidate.size.z) / 2 || 1;
+          const estimatedRadius = Math.max(mainCandidate.size.x, mainCandidate.size.z) / 2 || 1;
           mainRotor.userData.baseRadius = estimatedRadius;
           mainRotor.userData.baseScale = mainRotor.scale.clone();
-          console.log(
-            "Assigned mainRotor ->",
-            mainCandidate.name || mainRotor.id,
-            "baseRadius=",
-            estimatedRadius
-          );
         }
-      } else {
-        console.log("No rotor candidates detected.");
       }
-    } else {
-      console.error("Error loading helicopter:", fbxResult.reason);
     }
   })
-  .catch((e) => {
-    console.error("Error loading resources:", e);
-  });
+  .catch((e) => console.error("Error loading resources:", e));
 
-// Resize handling
+// Window resize handler
 function onWindowResize() {
-  const w = window.innerWidth;
+  const currentInfoPanelWidth = window.innerWidth * 0.4;
+  const w = window.innerWidth - currentInfoPanelWidth;
   const h = window.innerHeight;
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
@@ -494,35 +453,23 @@ function onWindowResize() {
 }
 window.addEventListener("resize", onWindowResize, false);
 
-// Physics update function (best practice velocity-based)
+// Update physics setiap frame
 function updateHelicopterPhysics(delta) {
-  // pastikan helikopter sudah load
   if (!helicopterLoaded || !helicopterGroup) return;
 
-  // --- Visual scaling based on mass ---
-  // scale factor uses cubic root to approximate linear dimensions from mass (volume ~ mass)
-  if (
-    helicopterGroup.userData &&
-    typeof helicopterGroup.userData.baseRestOffset !== "undefined"
-  ) {
+  // Visual scaling berdasarkan massa
+  if (helicopterGroup.userData && typeof helicopterGroup.userData.baseRestOffset !== "undefined") {
     let scaleFactor = Math.cbrt(physics.mass / BASE_MASS);
-    // clamp scale to reasonable bounds to avoid extreme visuals
     scaleFactor = Math.max(0.2, Math.min(5, scaleFactor));
     const prevScale = helicopterGroup.scale.x;
     if (Math.abs(scaleFactor - prevScale) > 1e-4) {
       const oldRestY = helicopterGroup.userData.currentRestY || restY;
-      const newRestY =
-        helicopterGroup.userData.groundY +
-        helicopterGroup.userData.clearance +
-        helicopterGroup.userData.baseRestOffset * scaleFactor;
+      const newRestY = helicopterGroup.userData.groundY + helicopterGroup.userData.clearance + helicopterGroup.userData.baseRestOffset * scaleFactor;
       const deltaY = newRestY - oldRestY;
-      // apply vertical adjustment so helicopter keeps proper ground contact visually
       helicopterGroup.position.y += deltaY;
-      // update global restY used in collision checks so physics uses new ground contact
       restY = newRestY;
       helicopterGroup.userData.currentRestY = newRestY;
       helicopterGroup.scale.setScalar(scaleFactor);
-      // ensure not clipping into ground after scale change
       if (helicopterGroup.position.y < restY) {
         helicopterGroup.position.y = restY;
         verticalVelocity = 0;
@@ -530,131 +477,131 @@ function updateHelicopterPhysics(delta) {
     }
   }
 
-  // baca nilai dari GUI
-  const liftInput = physics.liftForce;
-
-  // LIFT = input × koefisien
-  // liftForce is already specified in N (no extra multiplier)
-  const lift = liftInput; // gaya ke atas (N)
-
-  // GRAVITY (weight = m * g)
+  // Hitung gaya-gaya
+  const lift = physics.liftForce;
   const gravity = physics.mass * 9.8;
+  const netForce = lift - gravity;
 
-  // AIR DRAG (penting agar tidak memantul!)
-  const drag = Math.abs(verticalVelocity) * 8;
-
-  // NET FORCE
-  const netForce = lift - gravity - drag;
-
-  // ACCELERATION (actual)
+  // Hitung percepatan
   let acc = netForce / physics.mass;
-
-  // If helicopter is resting on the ground and the net force would pull it down,
-  // the ground reaction prevents downward acceleration: actual accel = 0.
   const onGround = helicopterGroup.position.y <= restY + 1e-4;
   if (onGround && Math.abs(verticalVelocity) < 1e-6 && netForce <= 0) {
     acc = 0;
   }
 
-  // UPDATE VELOCITY
+  // Update kecepatan dan posisi
   verticalVelocity += acc * delta;
-
-  // UPDATE POSITION
   helicopterGroup.position.y += verticalVelocity * delta * 60;
 
-  // COLLISION
+  // Collision dengan ground
   if (helicopterGroup.position.y < restY) {
     helicopterGroup.position.y = restY;
     verticalVelocity = 0;
   }
 
-  // update actual acceleration state value for display/handlers
   physics.a = acc;
 
-  // STATE STATUS
-  let state = "Hover ≈";
-  if (netForce > 50) state = "Rising ↑";
-  else if (netForce < -50) state = "Falling ↓";
+  // Status penerbangan
+  let state = "DI DARAT";
+  if (helicopterGroup.position.y > restY + 0.1) {
+    if (Math.abs(verticalVelocity) < 0.5 && Math.abs(acc) < 0.5) {
+      state = "MELAYANG";
+    } else if (verticalVelocity > 0.1) {
+      state = "NAIK";
+    } else if (verticalVelocity < -0.1) {
+      state = "TURUN";
+    }
+  }
 
-  // rotor saturation indicator (useful when required omega exceeds limits)
-  const rotorSaturated = physics.rotorSpeed >= MAX_ROTOR_SPEED - 1e-6;
-
-  // UPDATE HUD
-  updateHUD({
+  // Update info panel
+  updateInfoPanel({
     lift,
     mass: physics.mass,
     weight: gravity,
-    drag,
     netForce,
     acc,
     vel: verticalVelocity,
     pos: helicopterGroup.position.y,
-    desiredA: physics.a,
-    rotorSaturated,
     state,
+    rotorSpeed: physics.rotorSpeed,
+    bladeRadius: physics.bladeRadius,
   });
 }
 
-function updateHUD(params) {
-  const {
-    lift,
-    mass,
-    weight,
-    drag,
-    netForce,
-    acc,
-    vel,
-    pos,
-    state,
-    desiredA,
-    rotorSaturated,
-  } = params;
+// Update info panel dengan data fisika
+function updateInfoPanel(params) {
+  const { lift, mass, weight, netForce, acc, vel, pos, state, rotorSpeed, bladeRadius } = params;
 
-  hud.textContent = `--- HELICOPTER PHYSICS ---
-Lift Force : ${lift.toFixed(2)} N
-Mass       : ${mass.toFixed(2)} kg
-Weight     : ${weight.toFixed(2)} N
-Drag       : ${drag.toFixed(2)} N
----------------------------
-Net Force  : ${netForce.toFixed(2)} N
-Current Acc: ${acc.toFixed(2)} m/s²
-Velocity   : ${vel.toFixed(2)} m/s
-Height     : ${pos.toFixed(2)} m
----------------------------
-State      : ${state}
+  // Update parameter display
+  const paramMass = document.getElementById("param-mass");
+  const paramRadius = document.getElementById("param-radius");
+  const paramOmega = document.getElementById("param-omega");
+  
+  if (paramMass) paramMass.textContent = `${mass.toFixed(1)} kg`;
+  if (paramRadius) paramRadius.textContent = `${bladeRadius.toFixed(2)} m`;
+  if (paramOmega) paramOmega.textContent = `${rotorSpeed.toFixed(2)} rad/s`;
 
-${pos <= restY + 0.01 ? "✓ Ground Collision" : "Ground Collision: OFF"}
-`;
+  // Update formula display
+  const formulaWeight = document.getElementById("formula-weight");
+  const formulaThrust = document.getElementById("formula-thrust");
+  const formulaNet = document.getElementById("formula-net");
+  const formulaAccel = document.getElementById("formula-accel");
+  
+  if (formulaWeight) {
+    formulaWeight.innerHTML = `W = ${mass.toFixed(0)} × 9.8 = <strong>${weight.toFixed(1)} N</strong>`;
+  }
+  
+  if (formulaThrust) {
+    const R = bladeRadius;
+    const omega = rotorSpeed;
+    formulaThrust.innerHTML = `T = 0.13 × 1.225 × π × ${R.toFixed(2)}² × (${omega.toFixed(2)} × ${R.toFixed(2)})²<br>= <strong>${lift.toFixed(1)} N</strong>`;
+  }
+  
+  if (formulaNet) {
+    formulaNet.innerHTML = `F<sub>net</sub> = ${lift.toFixed(1)} - ${weight.toFixed(1)} = <strong>${netForce.toFixed(1)} N</strong>`;
+  }
+  
+  if (formulaAccel) {
+    formulaAccel.innerHTML = `a = ${netForce.toFixed(1)} / ${mass.toFixed(0)} = <strong>${acc.toFixed(3)} m/s²</strong>`;
+  }
+
+  // Update status display
+  const statusState = document.getElementById("status-state");
+  const statusVelocity = document.getElementById("status-velocity");
+  const statusHeight = document.getElementById("status-height");
+  const statusLift = document.getElementById("status-lift");
+  
+  if (statusState) {
+    let indicator = "status-grounded";
+    let stateText = state;
+    
+    if (state === "MELAYANG") indicator = "status-hovering";
+    else if (state === "NAIK") indicator = "status-climbing";
+    else if (state === "TURUN") indicator = "status-descending";
+    
+    statusState.innerHTML = `<span class="status-indicator ${indicator}"></span>${stateText}`;
+  }
+  
+  if (statusVelocity) statusVelocity.textContent = `${vel.toFixed(2)} m/s`;
+  if (statusHeight) statusHeight.textContent = `${pos.toFixed(2)} m`;
+  if (statusLift) statusLift.textContent = `${lift.toFixed(0)} N`;
 }
 
-// Animation loop
+// Main animation loop
 const clock = new THREE.Clock();
 function animate() {
   requestAnimationFrame(animate);
   const delta = clock.getDelta();
-  const elapsed = clock.getElapsedTime();
 
-  // Update controls
   controls.update();
 
-  // Update rotor visual from physics.rotorSpeed
+  // Update rotor rotation
   if (mainRotor) {
-    // rotor spin using physics.rotorSpeed (rad/s) * delta
     mainRotor.rotateY(physics.rotorSpeed * delta);
-  } else {
-    // fallback spin using MAIN_ROTOR_RPM if physics.rotorSpeed is zero (visual)
-    // convert rpm to rad/s: rpm * 2π / 60
-    const mainOmega = (MAIN_ROTOR_RPM * 2 * Math.PI) / 60;
-    if (mainRotor) mainRotor.rotateY(mainOmega * delta);
   }
 
-  // Update flight physics
   updateHelicopterPhysics(delta);
 
-  // Update mixer if any animations present
-  if (mixer) mixer.update(delta);
-
-  // Render
   renderer.render(scene, camera);
 }
 animate();

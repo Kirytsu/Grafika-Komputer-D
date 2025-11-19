@@ -1,61 +1,256 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<meta name="viewport" content="width=device-width,initial-scale=1" />
-		<title>Helicopter Simulation</title>
-		<style>
-			html, body { height: 100%; margin: 0; }
-			#app { width: 100%; height: 100%; overflow: hidden; background: #111; position: relative; }
-			.overlay { position: absolute; left: 8px; top: 8px; color: #fff; z-index: 1; font-family: Arial, Helvetica, sans-serif; font-size: 13px; }
-		</style>
-	</head>
-	<body>
-		<div id="app">
-			<div class="overlay">Helicopter Physics Simulation</div>
-			<!-- Left-side physics explanation panel -->
-			<div id="physicsInfo" 
-				style="position:absolute; left:10px; top:110px; padding:10px; width:320px; 
-				background:rgba(0,0,0,0.55); color:white; font-family:monospace; 
-				font-size:13px; white-space:pre-line; z-index:10;">
-			<strong>Hukum & Rumus Fisika</strong>
-		
-			Newton II: F = m · a
-			Berat (Weight): W = m · g  (g = 9.8 m/s²)
-			Gaya Hambat (Drag): D ≈ k · |v|  (di kode: k ≈ 8)
-		
-			Gaya Angkat Rotor (Thrust):
-			T = C_t · ρ · A · (Ω · R)²
-			  dengan A = π · R²
-		
-			Mencari kecepatan sudut rotor dari thrust:
-			Ω = sqrt(T / (C_t · ρ · A)) / R
-		
-			Percepatan aktual vertikal:
-			a = (T - W - D) / m
-				
-			Konstanta penting di kode: ρ = 1.225 kg/m³ (kepadatan udara), C_t = thrust coeff.
-			</div>
-			<div id="physicsHUD" 
-				style="position:absolute; right:10px; top:110px; padding:10px; 
-						background:rgba(0,0,0,0.55); color:white; font-family:monospace; 
-						font-size:13px; white-space:pre; z-index:10;">
-			Loading physics...
-			</div>
-		</div>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulasi Penerbangan Helikopter</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="landing-page">
+    <header>
+        <h1>Simulasi Penerbangan Helikopter</h1>
+        <p>Simulasi 3D interaktif untuk mendemonstrasikan pengaplikasian hukum fisika dalam penerbangan helikopter</p>
+        <a href="simulation.html" class="cta-button">Klik untuk Mulai</a>
+    </header>
 
-		<!-- Import map: map bare imports like "three" used inside example modules to a full CDN URL -->
-		<!-- <script src="https://cdn.jsdelivr.net/npm/lil-gui@0.19"></script> -->
-		<script type="importmap">
-		{
-			"imports": {
-				"three": "https://unpkg.com/three@0.158.0/build/three.module.js"
-			}
-		}
-		</script>
+    <div class="container">
+		<!-- Project Assignment Section -->
+        <div class="section">
+            <h2>Anggota Kelompok</h2>
+            <table class="constant-table">
+                <thead>
+                    <tr>
+                        <th>NIK</th>
+                        <th>Nama</th>
+                        <th>Tugas</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>5025231099</td>
+                        <td>Nathanael Valen Susilo</td>
+                        <td>Meload object dan membuat tampilan utama web</td>
+                    </tr>
+                    <tr>
+                        <td>5025231172</td>
+                        <td>Muh Khairul Amtsal</td>
+                        <td>Mengembangkan animasi dan membantu membuat penjelasan perhitungan</td>
+                    </tr>
+                    <tr>
+                        <td>5025231197</td>
+                        <td>Samuel Steve Mulyono</td>
+                        <td>Membuat kontrol dan perhitungan simulasi</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
 
-		<!-- Load the app as an ES module so we can import Three.js examples from CDN -->
-		<script type="module" src="./app.js"></script>
-	</body>
+        <!-- Overview Section -->
+        <div class="section">
+            <h2>Ringkasan Simulasi</h2>
+            <p>
+                Simulasi 3D interaktif ini menunjukkan bagaimana <strong>helikopter dapat terbang naik dan turun</strong> 
+                menggunakan fisika sederhana. Pengguna dapat mengontrol <strong>massa helikopter, kecepatan maupun jari-jari dari 
+				baling-baling helikopter</strong> untuk menyimulasikan dampaknya terhadap penerbangan helikopter. 
+				Simulasi ini dipengaruhi pada hukum fisika utamanya <strong>aerodinamika</strong> seperti Hukum Newton dan prinsip gaya angkat,
+				tetapi dengan penyederhanaan seperti <strong>mengabaikan gaya gesek udara</strong> agar lebih mudah mudah dipahami.
+            </p>
+            
+        </div>
+
+        <!-- Physics Laws Section -->
+        <div class="section">
+            <h2>Hukum & Prinsip Fisika</h2>
+            
+            <div class="physics-law">
+                <h4>1. Hukum Gerak Newton Kedua</h4>
+                <div class="formula">
+                    F = m × a
+                </div>
+                <p><strong>Definisi:</strong></p>
+                <ul>
+                    <li><strong>F</strong> = Gaya yang mengangkat helikopter (dalam Newton)</li>
+                    <li><strong>m</strong> = Massa helikopter (dalam kg)</li>
+                    <li><strong>a</strong> = Percepatan helikopter untuk terbang (dalam m/s²)</li>
+                </ul>
+                <p><strong>Contoh pada parameter simulasi:</strong></p>
+                <div class="calculation-box">
+                    <p>Jika massa = <span class="highlight">2000 kg</span> dan percepatan yang dinginkan = <span class="highlight">2 m/s²</span></p>
+                    <div class="formula">F = 2000 × 2 = 4,000 N</div>
+                    <p>Diperlukan gaya sebesar 4,000 Newton untuk percepatan helikopter sebesar 2 m/s²</p>
+                </div>
+            </div>
+
+            <div class="physics-law">
+                <h4>2. Gravitasi (Berat)</h4>
+                <div class="formula">
+                    W = m × g
+                </div>
+                <p><strong>Definisi:</strong></p>
+                <ul>
+                    <li><strong>W</strong> = Berat (gaya ke bawah dari gravitasi, dalam Newton)</li>
+                    <li><strong>m</strong> = Massa helikopter (dalam kg)</li>
+                    <li><strong>g</strong> = Kekuatan gravitasi Bumi = 9.8 m/s² (selalu sama)</li>
+                </ul>
+                <p><strong>Contoh pada parameter simulasi:</strong></p>
+                <div class="calculation-box">
+                    <p>Jika massa = <span class="highlight">2000 kg</span></p>
+                    <div class="formula">W = 2000 × 9.8 = 19,600 N</div>
+                    <p>Helikopter memiliki gaya sebesar 19,600 Newton yang terus menariknya ke bawah</p>
+                </div>
+            </div>
+
+            <div class="physics-law">
+                <h4>3. Gaya Angkat (Gaya ke Atas)</h4>
+                <div class="formula">
+                    T = C<sub>t</sub> × ρ × π × R² × (Ω × R)²
+                </div>
+                <p><strong>Definisi:</strong></p>
+                <ul>
+                    <li><strong>T</strong> = Gaya Angkat (gaya ke atas dari baling-baling, dalam Newton)</li>
+                    <li><strong>C<sub>t</sub></strong> = Koefisien gaya angkat = 0.13 (efisiensi baling-baling)</li>
+                    <li><strong>ρ</strong> = Densitas udara = 1.225 kg/m³ (pada permukaan laut)</li>
+                    <li><strong>R</strong> = Jari-jari baling (panjang baling-baling, dalam meter)</li>
+                    <li><strong>Ω</strong> = Kecepatan baling-baling (seberapa cepat putaran baling-baling, dalam rad/s)</li>
+                </ul>
+                <p><strong>Contoh pada parameter simulasi:</strong></p>
+                <div class="calculation-box">
+                    <p>Jika jari-jari baling R = <span class="highlight">4.5 m</span> dan kecepatan baling-baling Ω = <span class="highlight">23.5 rad/s</span></p>
+                    <div class="formula">
+                        T = 0.13 × 1.225 × π × (4.5)² × (23.5 × 4.5)²<br>
+                        T = 0.13 × 1.225 × 3.14159 × 20.25 × 11,182.5625<br>
+                        T ≈ 19,600 N
+                    </div>
+                    <p>Pada kecepatan baling-baling ini, helikopter dapat menghasilkan tepat 19,600 N dimana cukup untuk melayang di udara</p>
+                </div>
+            </div>
+
+            <h3>Bagaimana Status Helikopter</h3>
+            <p>Helikopter dapat bergerak naik atau turun berdasarkan gaya mana yang lebih kuat:</p>
+            <div class="formula">
+                Resultan Gaya = Gaya Angkat - Berat
+            </div>
+            <div class="formula">
+                Percepatan = Resultan Gaya ÷ massa
+            </div>
+            <p><strong>Prinsip Terbang Sederhana:</strong></p>
+            <ul>
+                <li>Jika <strong>Gaya Angkat &gt; Berat</strong> → Helikopter <strong>NAIK</strong></li>
+                <li>Jika <strong>Gaya Angkat = Berat</strong> → Helikopter <strong>MELAYANG</strong> (tetap diam)</li>
+                <li>Jika <strong>Gaya Angkat &lt; Berat</strong> → Helikopter <strong>TURUN</strong></li>
+            </ul>
+            <p><em>Catatan: Gaya gesek udara dianggap nol supaya perhitungan tetap sederhana dan mudah dimengerti</em></p>
+        </div>
+
+        <!-- Calculation Section -->
+        <div class="section">
+            <h2>Menghitung Gaya Minimum untuk Terbang</h2>
+            
+            <p>
+                Untuk membuat helikopter dapat terbang, <strong>gaya angkat ke atas harus setidaknya sama dengan berat</strong>. 
+            </p>
+
+            <div class="calculation-box">
+                <h4>Tahap Perhitungan:</h4>
+                
+                <div class="step">
+                    <strong>Langkah 1: Hitung Berat Helikopter</strong>
+                    <div class="formula">Berat = massa × 9.8</div>
+                    <p>Contoh: Jika helikopter memiliki massa 2000 kg:</p>
+                    <div class="formula">Berat = 2000 × 9.8 = 19,600 N</div>
+                    <p>Ini adalah gaya yang menarik helikopter ke bawah.</p>
+                </div>
+
+                <div class="step">
+                    <strong>Langkah 2: Hitung Gaya Angkat Minimum untuk Melayang</strong>
+                    <p>Untuk melayang (tetap di satu tempat), gaya angkat ke atas harus sama dengan berat:</p>
+                    <div class="formula">Gaya Angkat yang dibutuhkan = Berat</div>
+                    <div class="formula">Gaya Angkat = 19,600 N</div>
+                    <p>Jika gaya angkat = berat, resultan gaya menjadi 0 sehingga helikopter bisa tetap diam di udara</p>
+                </div>
+
+                <div class="step">
+                    <strong>Langkah 3: Hitung Seberapa Cepat Baling-Baling Harus Berputar</strong>
+                    <p>Menggunakan rumus gaya angkat dengan jari-jari baling R = 4.5 meter:</p>
+                    <div class="formula">Kecepatan yang dibutuhkan ≈ 23.5 rad/s</div>
+					<p>Sehingga total untuk helikopter dengan berat 19,600 N dan jari-jari dari baling-baling 4,5 m,
+						dibutuhkan kecepatan baling-baling sekitar 23,5 rad/s agar helikopter dapat melayang di udara. 
+						Atau kecepatan baling-baling di atas 23,5 rad/s agar helikopter dapat terbang naik.
+					</p>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Constants Section -->
+        <div class="section">
+            <h2>Konstanta Simulasi</h2>
+            <table class="constant-table">
+                <thead>
+                    <tr>
+                        <th>Konstanta</th>
+                        <th>Simbol</th>
+                        <th>Nilai</th>
+                        <th>Deskripsi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Percepatan Gravitasi</td>
+                        <td>g</td>
+                        <td>9.8 m/s²</td>
+                        <td>Gravitasi Bumi (standar)</td>
+                    </tr>
+                    <tr>
+                        <td>Densitas Udara</td>
+                        <td>ρ</td>
+                        <td>1.225 kg/m³</td>
+                        <td>Kerapatan udara pada permukaan laut</td>
+                    </tr>
+                    <tr>
+                        <td>Koefisien Gaya Angkat</td>
+                        <td>C<sub>t</sub></td>
+                        <td>0.13</td>
+                        <td>Faktor efisiensi dari baling-baling</td>
+                    </tr>
+                    <tr>
+                        <td>Kecepatan Rotor Maksimum</td>
+                        <td>Ω<sub>max</sub></td>
+                        <td>50 rad/s</td>
+                        <td>Menyesuaikan batas aman putaran baling-baling (~477 RPM)</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- How to Use Section -->
+        <div class="section">
+            <h2>Penggunaan Simulasi</h2>
+            
+            <h3>Kontrol:</h3>
+            <ul>
+                <li><strong>Gaya Angkat</strong>: Mengatur gaya dorong langsung dalam Newton (0-30,000 N)</li>
+                <li><strong>Kecepatan Baling</strong>: Mengatur kecepatan putaran baling-baling dalam rad/s (0-50 rad/s)</li>
+                <li><strong>Jari-jari Baling-Baling</strong>: Mengatur panjang dari bilah baling-baling (2-10 m)</li>
+                <li><strong>Percepatan</strong>: Target percepatan naiknya helikopter (menghitung kecepatan baling-baling otomatis)</li>
+                <li><strong>Massa</strong>: Mengatur massa dari helikopter (100-5000 kg)</li>
+            </ul>
+
+            <h3>Tampilan:</h3>
+            <ul>
+                <li><strong>Tarik mouse</strong>: Putar tampilan kamera</li>
+                <li><strong>Roda mouse</strong>: Zoom in/out</li>
+                <li><strong>Tarik + klik kanan</strong>: Geser kamera</li>
+            </ul>
+
+            <h3>Notes:</h3>
+            <ul>
+                <li>Atur <strong>Percepatan</strong> yang diinginkan menjadi 0 agar secara otomatis mengubah status helikopter menjadi melayang</li>
+                <li>Ubah <strong>massa</strong> dan perhatikan bagaimana gaya angkat yang dibutuhkan juga berubah</li>
+                <li>Ubah <strong>jari-jari dan kecepatan baling-baling</strong> kemudian perhatikan bagaimana hal itu mempengaruhi gaya angkat helikopter</li>
+            </ul>
+        </div>
+    </div>
+</body>
 </html>
 
