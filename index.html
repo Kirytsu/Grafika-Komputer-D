@@ -13,9 +13,39 @@
 	<body>
 		<div id="app">
 			<div class="overlay">Helicopter Physics Simulation</div>
+			<!-- Left-side physics explanation panel -->
+			<div id="physicsInfo" 
+				style="position:absolute; left:10px; top:110px; padding:10px; width:320px; 
+				background:rgba(0,0,0,0.55); color:white; font-family:monospace; 
+				font-size:13px; white-space:pre-line; z-index:10;">
+			<strong>Hukum & Rumus Fisika</strong>
+		
+			Newton II: F = m · a
+			Berat (Weight): W = m · g  (g = 9.8 m/s²)
+			Gaya Hambat (Drag): D ≈ k · |v|  (di kode: k ≈ 8)
+		
+			Gaya Angkat Rotor (Thrust):
+			T = C_t · ρ · A · (Ω · R)²
+			  dengan A = π · R²
+		
+			Mencari kecepatan sudut rotor dari thrust:
+			Ω = sqrt(T / (C_t · ρ · A)) / R
+		
+			Percepatan aktual vertikal:
+			a = (T - W - D) / m
+				
+			Konstanta penting di kode: ρ = 1.225 kg/m³ (kepadatan udara), C_t = thrust coeff.
+			</div>
+			<div id="physicsHUD" 
+				style="position:absolute; right:10px; top:110px; padding:10px; 
+						background:rgba(0,0,0,0.55); color:white; font-family:monospace; 
+						font-size:13px; white-space:pre; z-index:10;">
+			Loading physics...
+			</div>
 		</div>
 
 		<!-- Import map: map bare imports like "three" used inside example modules to a full CDN URL -->
+		<!-- <script src="https://cdn.jsdelivr.net/npm/lil-gui@0.19"></script> -->
 		<script type="importmap">
 		{
 			"imports": {
